@@ -6,8 +6,285 @@ import plotly.graph_objects as go
 import datetime
 from itertools import product
 import json
+import numpy as np
 from setup import graph_heading_with_info
 from load_data import fetch_instance_counts, fetch_run_data, fetch_temporal_activity_data, get_temporal_insights_from_ai, prepare_llm_friendly_json
+
+# --- New: Activity Metrics Comparison ---
+def tenant_comparison(selected_tenants, filtered_df):
+    st.subheader("📊 Tenant Comparison Dashboard")
+    
+    # Activity comparison metrics
+    st.markdown("### Activity Metrics Comparison")
+    
+    # Create columns for metrics
+    col1, col2, col3 = st.columns(3)
+    
+    # Calculate overall metrics
+    total_actions = filtered_df.shape[0]
+    active_tenants = len(selected_tenants)
+    
+    # Calculate MoM change
+    today = datetime.date.today()
+    current_month_start = today.replace(day=1)
+    prev_month_end = current_month_start - datetime.timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
+    
+    current_month_data = filtered_df[
+        (filtered_df["date"] >= current_month_start) & 
+        (filtered_df["date"] <= today)
+    ]
+    
+    prev_month_data = filtered_df[
+        (filtered_df["date"] >= prev_month_start) & 
+        (filtered_df["date"] <= prev_month_end)
+    ]
+    
+    current_activity = current_month_data.shape[0]
+    prev_activity = prev_month_data.shape[0]
+    
+    mom_change = ((current_activity - prev_activity) / prev_activity * 100) if prev_activity > 0 else float('inf')
+    
+    # Display metrics
+    with col1:
+        st.metric("Total Actions", total_actions)
+    with col2:
+        st.metric("Active Tenants", active_tenants)
+    with col3:
+        display_value = f"{mom_change:.1f}%" if not np.isinf(mom_change) else "N/A (New)"
+        delta = mom_change if not np.isinf(mom_change) else None
+        st.metric("MoM Change", display_value, delta=f"{delta:.1f}%" if delta else None)
+    
+    # Create tenant comparison table
+    activity_comparison = filtered_df.groupby("tenant").agg(
+        total_actions=("type", "count"),
+        unique_users=("username", "nunique"),
+        last_activity=("ts", "max")
+    ).reset_index()
+    
+    # Calculate MoM change per tenant
+    current_counts = current_month_data.groupby("tenant").size()
+    prev_counts = prev_month_data.groupby("tenant").size()
+    
+    activity_comparison["mom_change"] = activity_comparison["tenant"].apply(
+        lambda x: ((current_counts.get(x, 0) - prev_counts.get(x, 0)) / 
+                 prev_counts.get(x, 1) * 100 if prev_counts.get(x, 0) > 0 
+                 else float('inf'))
+    )
+    
+    # Format and display table
+    formatted_df = activity_comparison.copy()
+    formatted_df["last_activity"] = formatted_df["last_activity"].dt.strftime("%Y-%m-%d")
+    formatted_df["mom_change"] = formatted_df["mom_change"].apply(
+        lambda x: f"{x:.1f}%" if not np.isinf(x) else "N/A (New)"
+    )
+    
+    st.dataframe(
+        formatted_df.rename(columns={
+            "tenant": "Tenant",
+            "total_actions": "Total Actions",
+            "unique_users": "Unique Users",
+            "last_activity": "Last Activity",
+            "mom_change": "MoM Change"
+        }).style.applymap(
+            lambda x: 'color: red' if isinstance(x, str) and '-' in x else 'color: green',
+            subset=["MoM Change"]
+        ),
+        use_container_width=True
+    )
+    
+    # --- Activity Trend Comparison ---
+    st.markdown("### Activity Trend Comparison")
+    daily_activity = filtered_df.groupby(["date", "tenant"]).size().unstack().fillna(0)
+    
+    fig = px.line(
+        daily_activity,
+        x=daily_activity.index,
+        y=daily_activity.columns,
+        title="Daily Activity Trend Comparison",
+        labels={"value": "Activity Count", "date": "Date", "variable": "Tenant"},
+        height=500
+    )
+    fig.update_layout(
+        hovermode="x unified",
+        legend_title_text="Tenant",
+        plot_bgcolor="#111111",
+        paper_bgcolor="#111111",
+        font_color="white"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # --- Peak Usage Analysis ---
+    st.markdown("### Peak Usage Analysis")
+    hourly_activity = filtered_df.copy()
+    hourly_activity["hour"] = hourly_activity["ts"].dt.hour
+    hourly_counts = hourly_activity.groupby(["tenant", "hour"]).size().reset_index(name="count")
+    
+    fig = px.bar(
+        hourly_counts,
+        x="hour",
+        y="count",
+        color="tenant",
+        barmode="group",
+        title="Hourly Activity Distribution",
+        labels={"count": "Activity Count", "hour": "Hour of Day"},
+        height=500
+    )
+    fig.update_layout(
+        xaxis=dict(tickmode="linear", dtick=1),
+        plot_bgcolor="#111111",
+        paper_bgcolor="#111111",
+        font_color="white"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- New: User Engagement Insights ---
+def user_engagement_insights(filtered_df):
+    graph_heading_with_info(
+        "User Engagement Insights",
+        "Identifies top engaged users and at-risk users based on activity patterns"
+    )
+    
+    # User engagement metrics
+    st.markdown("### User Engagement Metrics")
+    user_stats = filtered_df.groupby(["tenant", "username"]).agg(
+        total_actions=("type", "count"),
+        last_activity=("ts", "max"),
+        active_days=("date", "nunique")
+    ).reset_index()
+    
+    # Calculate engagement scores
+    max_date = filtered_df["date"].max()
+    user_stats["last_activity"] = pd.to_datetime(user_stats["last_activity"])
+    user_stats["days_since_active"] = (max_date - user_stats["last_activity"].dt.date).apply(lambda x: x.days)
+    user_stats["engagement_score"] = user_stats["total_actions"] / user_stats["active_days"]
+    
+    # Display top/bottom users
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Top Engaged Users**")
+        top_users = user_stats.nlargest(5, "engagement_score")
+        st.dataframe(top_users[["tenant", "username", "engagement_score"]].rename(columns={
+            "tenant": "Tenant", "username": "User", "engagement_score": "Engagement Score"
+        }), hide_index=True)
+    
+    with col2:
+        st.markdown("**At-Risk Users**")
+        at_risk = user_stats[user_stats["days_since_active"] > 14].nlargest(5, "days_since_active")
+        st.dataframe(at_risk[["tenant", "username", "days_since_active"]].rename(columns={
+            "tenant": "Tenant", "username": "User", "days_since_active": "Days Inactive"
+        }), hide_index=True)
+    
+    # --- User Retention Analysis ---
+    graph_heading_with_info(
+        "User Retention Analysis",
+        "Shows user retention rates over time with simplified visualization"
+    )
+    
+    retention_df = filtered_df.copy()
+    retention_df["date"] = pd.to_datetime(retention_df["date"], errors="coerce")
+    retention_df["cohort_month"] = (
+    retention_df.groupby("username")["date"]
+    .transform("min")
+    .dt.to_period("M")
+    )
+    retention_df["activity_month"] = retention_df["date"].dt.to_period("M")
+    
+    # Calculate retention rates
+    cohort_data = retention_df.groupby(["cohort_month", "activity_month"]).agg(
+        users=("username", "nunique")
+    ).reset_index()
+    
+    cohort_size = cohort_data.groupby("cohort_month")["users"].first().reset_index()
+    cohort_size.columns = ["cohort_month", "cohort_size"]
+    
+    retention_rates = pd.merge(cohort_data, cohort_size, on="cohort_month")
+    retention_rates["retention_rate"] = (retention_rates["users"] / retention_rates["cohort_size"]) * 100
+    
+    # Calculate months since joining
+    retention_rates["months_since_joining"] = (
+        retention_rates["activity_month"] - retention_rates["cohort_month"]
+    ).apply(lambda x: x.n)
+    
+    # Simplify to line chart
+    fig = px.line(
+        retention_rates,
+        x="months_since_joining",
+        y="retention_rate",
+        color="cohort_month",
+        title="User Retention Over Time",
+        labels={
+            "retention_rate": "Retention Rate (%)",
+            "months_since_joining": "Months After Joining",
+            "cohort_month": "Cohort Month"
+        },
+        height=500
+    )
+    fig.update_layout(
+        plot_bgcolor="#111111",
+        paper_bgcolor="#111111",
+        font_color="white",
+        legend_title_text="Cohort Month"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# --- NEW: Simple Weekly User Activity ---
+def user_activity_trends_simple(filtered_df):
+    """
+    Weekly user activity (absolute counts) shown as small-multiples bar charts.
+    Much cleaner than the percentage-stacked monster.
+    """
+    graph_heading_with_info(
+        "Weekly User Activity Count",
+        "Each mini-chart shows how many actions each user performed per week. "
+        "Easier to read and compare across tenants."
+    )
+
+    # 1. keep only last 8 weeks to avoid clutter
+    cutoff = datetime.date.today() - datetime.timedelta(weeks=8)
+    df = filtered_df[filtered_df["date"] >= cutoff].copy()
+
+    # 2. week start (Monday)
+    df["week_start"] = df["ts"] - pd.to_timedelta(df["ts"].dt.weekday, unit="D")
+    df["week_start"] = df["week_start"].dt.date
+
+    # 3. counts per user per week
+    counts = (
+        df.groupby(["week_start", "tenant", "username"])
+        .size()
+        .reset_index(name="activity_count")
+    )
+
+    # 4. small-multiples bar chart
+    fig = px.bar(
+        counts,
+        x="week_start",
+        y="activity_count",
+        color="username",
+        facet_col="tenant",
+        facet_col_wrap=2,
+        height=600,
+        labels={
+            "activity_count": "Actions",
+            "week_start": "Week Starting",
+            "username": "User",
+        },
+        title="Weekly Actions per User"
+    )
+
+    fig.update_xaxes(tickformat="%b %d", tickangle=-45)
+    fig.update_layout(
+        barmode="group",
+        plot_bgcolor="#111111",
+        paper_bgcolor="#111111",
+        font_color="white",
+        legend_title_text="User",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.3,
+                    xanchor="center", x=0.5)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- Activity Timeline with Annotated Latest Activities ---
 def display_activity_chart(filtered_df):
@@ -502,7 +779,7 @@ def insights(selected_tenants):
         "Tenant-wise Temporal Behavior Insights (AI Generated)",
         "These insights are derived from deepseek-chat-v3-0324 model analyzing temporal activity across tenants, highlighting anomalies, patterns, and inefficiencies."
     )
-    with st.expander("View AI Insight for selected Tenant(s)"):
+    with st.expander("View AI Insight for selected Tenant(s)", expanded=True):
         tenants = selected_tenants if selected_tenants else None
         temp_df = fetch_temporal_activity_data(tenants)
 
@@ -518,8 +795,20 @@ def insights(selected_tenants):
             with st.spinner(f"Analyzing behavior for {tenant_name}..."):
                 insight = get_temporal_insights_from_ai(payload_json)
 
-            with st.expander(f"🔹 {tenant_name} Insights"):
-                st.markdown(insight)
+            with st.expander(f"🔹 {tenant_name} Insights", expanded=True):
+                # Use container with scrolling for long insights
+                st.markdown(f"""
+                    <div style="
+                        max-height: 300px; 
+                        overflow-y: auto; 
+                        padding: 10px; 
+                        background: #1e1e1e; 
+                        border-radius: 5px;
+                        border: 1px solid #444;
+                    ">
+                        {insight}
+                    </div>
+                """, unsafe_allow_html=True)
 
 # --- BCG Matrix ---
 def display_bcg_matrix():
