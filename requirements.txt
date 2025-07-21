@@ -2,10 +2,8 @@ faiss-cpu==1.11.0.post1
 numpy==2.3.1
 sentence-transformers==5.0.0
 openai==1.93.1
-Flask==3.1.1
 python-dotenv==1.1.1
 streamlit==1.46.1
 pandas==2.3.0
 neo4j==5.28.1
-requests==2.32.4
 plotly==6.2.0

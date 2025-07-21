@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import requests
+from llm import rag_engine
 import plotly.express as px
 import plotly.graph_objects as go
 import datetime
@@ -288,22 +288,54 @@ def user_activity_trends_simple(filtered_df):
 
 # --- Activity Timeline with Annotated Latest Activities ---
 def display_activity_chart(filtered_df):
-    graph_heading_with_info(
-        "Tenant Wise Activity Timeline",
-        "Shows each tenant's actions over time. Hover for details on each action."
-    )
+    col1, col2 = st.columns([0.85, 0.15])
+    with col1:
+        graph_heading_with_info(
+            "Tenant Activity Timeline",
+            "Shows tenant activities over time. Toggle to show status (success/failure) info."
+        )
+    with col2:
+        show_status = st.checkbox("Show Status", value=False)
 
-    fig = px.scatter(
-        filtered_df,
-        x="ts",
-        y="tenant",
-        color="tenant",
-        hover_data=["message", "username"],
-        title="Activity by Tenant Over Time",
-        height=500
+    tenant_order = sorted(filtered_df["tenant"].unique())
+
+    if show_status:
+        filtered_df["status"] = filtered_df["status"].apply(lambda x: "success" if x != "failed" and x else "failed")
+        color_map = {"success": "green", "failed": "red"}
+
+        fig = px.scatter(
+            filtered_df,
+            x="ts",
+            y="tenant",
+            color="status",
+            color_discrete_map=color_map,
+            hover_data=["username", "message", "type"],
+            category_orders={"tenant": tenant_order},
+            title="Tenant Activity with Success/Failure Status",
+            height=500
+        )
+        fig.update_traces(marker=dict(size=12, symbol="circle"))
+
+    else:
+        fig = px.scatter(
+            filtered_df,
+            x="ts",
+            y="tenant",
+            color="tenant",
+            hover_data=["message", "username"],
+            category_orders={"tenant": tenant_order},
+            title="Activity by Tenant Over Time",
+            height=500
+        )
+        fig.update_traces(marker=dict(size=12))
+
+        # Annotate latest action per tenant
+    latest_activity = (
+        filtered_df.sort_values("ts", ascending=False)
+        .groupby("tenant")
+        .first()
+        .reset_index()
     )
-    fig.update_traces(marker=dict(size=12))
-    latest_activity = filtered_df.sort_values("ts", ascending=False).groupby("tenant").first().reset_index()
 
     for _, row in latest_activity.iterrows():
         fig.add_annotation(
@@ -322,37 +354,14 @@ def display_activity_chart(filtered_df):
 
     st.plotly_chart(fig, use_container_width=True)
 
+
 # --- Action Success vs Failure Timeline ---
-def display_action_success_chart(filtered_df):
-    graph_heading_with_info(
-        "Activity Success vs Failure Timeline",
-        "Shows whether actions performed by tenants were successful or failed over time."
-    )
-
-
-    filtered_df["status"] = filtered_df["status"].apply(lambda x: "success" if x != "failed" and x else "failed")
-    color_map = {"success": "green", "failed" : "red"}
-
-    fig = px.scatter(
-        filtered_df,
-        x="ts",
-        y="tenant",
-        color="status",
-        color_discrete_map=color_map,
-        hover_data=["username", "message", "type"],
-        title="Action Outcomes Over Time",
-        height=500,
-        symbol="status",
-    )
-    fig.update_traces(marker=dict(size=12, symbol="circle"))
-
-    st.plotly_chart(fig, use_container_width=True)
 
 # --- Weekly Activity Overview with Tenant Comparison ---
 def display_weekly_activity(filtered_df):
     graph_heading_with_info(
         "Weekly Activity by Tenants",
-        "Weekly count of all user actions grouped by tenant."
+        "Weekly count of all user activities grouped by tenant."
     )
     weeks_back = st.number_input("Showing data for past N weeks:", min_value=1, max_value=52, value=6, step=1)
 
@@ -477,7 +486,7 @@ def display_daily_activity(pivot, filtered_df, selected_tenants):
 def display_top_active_users(combined_daywise):
     graph_heading_with_info(
         "Top N Active Users per Tenant",
-        "Ranks users based on number of actions performed within selected weeks."
+        "Ranks users based on number of activities performed within selected weeks."
     )
     top_n = st.number_input("Select how many top users to show per tenant:", min_value=1, max_value=10, value=2, step=1)
 
@@ -498,7 +507,7 @@ def display_top_active_users(combined_daywise):
         with st.expander(f"Tenant: {tenant}"):
             for _, row in tenant_users.iterrows():
                 key = f"expand_{tenant}_{row['username']}"
-                if st.button(f"👤 {row['username']} ({row['action_count']} actions)", key=key + "_btn"):
+                if st.button(f"👤 {row['username']} ({row['action_count']} activities)", key=key + "_btn"):
                     st.session_state[key] = not st.session_state.get(key, False)
                 if st.session_state.get(key, False):
                     user_df = combined_daywise[
@@ -633,12 +642,13 @@ def instance_type_distribution(selected_tenants, date_range, selected_weeks, ava
     with col1:
         graph_heading_with_info(
             "Filtered Instance Type Distribution",
-            "Breakdown of instance types provisioned or deleted for each tenant during the selected timeframe."
+            "Breakdown of instance types provisioned or deleted for each tenant during the selected timeframe. Toggle to include/exclude deleted instances."
         )
     with col2:
         show_deleted = st.checkbox("Include Deleted", value=False)
 
-    filtered_prov_df = provisioned_df.copy()
+    deleted_ids = set(deleted_df["instance_id"])
+    filtered_prov_df = provisioned_df[~provisioned_df["instance_id"].isin(deleted_ids)].copy()
     filtered_prov_df["status"] = "Provisioned"
 
     if show_deleted:
@@ -690,6 +700,69 @@ def instance_type_distribution(selected_tenants, date_range, selected_weeks, ava
     )
 
     st.plotly_chart(fig_type, use_container_width=True)
+    # --- Plan Distribution ---
+    col1, col2 = st.columns([0.8, 0.2])
+    with col1:
+        graph_heading_with_info(
+            "Filtered Machine Type Distribution",
+            "Breakdown of instance plans provisioned or deleted for each tenant. Toggle to include/exclude deleted plans."
+        )
+    with col2:
+        show_deleted = st.checkbox("Include Deleted", value=False, key="plan_deleted_checkbox")
+
+        deleted_ids = set(deleted_df["instance_id"])
+    filtered_prov_df = provisioned_df[~provisioned_df["instance_id"].isin(deleted_ids)].copy()
+    filtered_prov_df["status"] = "Provisioned"
+
+    if show_deleted:
+        filtered_del_df = deleted_df.copy()
+        filtered_del_df["status"] = "Deleted"
+        combined_df = pd.concat([filtered_prov_df, filtered_del_df], ignore_index=True)
+    else:
+        combined_df = filtered_prov_df
+
+    plan_counts = (
+        combined_df
+        .groupby(["tenant", "instance_plan", "status"])["instance_id"]
+        .nunique()
+        .reset_index(name="count")
+    )
+
+    view_mode = st.radio("Plan View Mode:", ["Absolute Count", "Percentage"], key="plan_view_mode")
+    if view_mode == "Percentage":
+        total_per_group = plan_counts.groupby(["tenant", "status"])["count"].transform("sum")
+        plan_counts["percent"] = (plan_counts["count"] / total_per_group * 100).round(2)
+        y_col = "percent"
+    else:
+        y_col = "count"
+
+    fig = px.bar(
+        plan_counts,
+        x="instance_plan",
+        y=y_col,
+        color="tenant",
+        pattern_shape="status" if show_deleted else None,
+        pattern_shape_sequence=["", "/"],
+        barmode="group",
+        labels={
+            "instance_plan": "Instance Plan",
+            "tenant": "Tenant",
+            "count": "Machine Type count",
+            "percent": "Percentage",
+            "status": "Status"
+        },
+        title=f"Instance Plans per Tenant ({'with Deleted' if show_deleted else 'Provisioned Only'})",
+        height=500
+    )
+
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        plot_bgcolor="#111111",
+        paper_bgcolor="#111111",
+        font_color="white"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # --- Gantt Chart ---
 def display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, available_weeks, select_all):
@@ -730,6 +803,7 @@ def display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, ava
                     total_cpu=("avg_cpu", "sum"),
                     start=("start", "min"),
                     end=("end", "max"),
+                    run_count=("avg_cpu", "count"),
                     running_instances=("instance_id", pd.Series.nunique)
                 )
                 .reset_index()
@@ -737,8 +811,8 @@ def display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, ava
 
             tenant_summary = pd.merge(cpu_summary, tenant_instance_counts, on="tenant", how="left")
             tenant_summary["avg_cpu"] = (
-                tenant_summary["total_cpu"] / tenant_summary["total_instances"]
-            ).fillna(0)
+                tenant_summary["total_cpu"] / tenant_summary["run_count"]
+            ).fillna(0).round(2)
 
             fig = px.timeline(
                 tenant_summary,
@@ -748,7 +822,7 @@ def display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, ava
                 color="avg_cpu",
                 color_continuous_scale="Viridis",
                 labels={"avg_cpu": "Avg CPU (%)"},
-                title="Tenant Run Activity Timeline (Avg CPU % per Week)",
+                title="Tenant Run Activity Timeline (Avg CPU % per Run per Week)",
                 hover_data={
                     "start": True,
                     "end": True,
@@ -765,13 +839,11 @@ def display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, ava
                 paper_bgcolor="#111111",
                 font_color="white",
                 coloraxis_colorbar=dict(title="Avg CPU %")
-            )        
+            )
 
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No run data available for selected filters.")
-    else:
-        st.warning("No run data found in the database.")
 
 # --- Insights Section ---
 def insights(selected_tenants):
@@ -821,14 +893,15 @@ def display_bcg_matrix():
     run_df = fetch_run_data()
 
     if inst_df.empty:
-        st.warning("No instance action data available.")
+        st.warning("No user or instance action data available.")
         return
 
-    inst_df = inst_df[inst_df["action_type"] == "PROVISIONS"]
-    inst_df = inst_df[["tenant", "username", "instance_id"]].dropna().drop_duplicates()
+    all_users = inst_df[["tenant", "username"]].drop_duplicates()
 
+    provs = inst_df[inst_df["action_type"] == "PROVISIONS"]
+    provs = provs[["tenant", "username", "instance_id"]].dropna().drop_duplicates()
     provision_counts = (
-        inst_df.groupby(["tenant", "username"])
+        provs.groupby(["tenant", "username"])
         .agg(num_vms=("instance_id", "nunique"))
         .reset_index()
     )
@@ -836,7 +909,7 @@ def display_bcg_matrix():
     run_df["start"] = pd.to_datetime(run_df["start"])
     run_df = run_df[["tenant", "instance_id", "avg_cpu"]]
 
-    merged = pd.merge(inst_df, run_df, on=["tenant", "instance_id"], how="left")
+    merged = pd.merge(provs, run_df, on=["tenant", "instance_id"], how="left")
 
     cpu_usage = (
         merged.groupby(["tenant", "username"])
@@ -844,7 +917,8 @@ def display_bcg_matrix():
         .reset_index()
     )
 
-    user_stats = pd.merge(provision_counts, cpu_usage, on=["tenant", "username"], how="outer")
+    user_stats = pd.merge(all_users, provision_counts, on=["tenant", "username"], how="left")
+    user_stats = pd.merge(user_stats, cpu_usage, on=["tenant", "username"], how="left")
 
     user_stats["num_vms"] = user_stats["num_vms"].fillna(0).astype(int)
     user_stats["avg_cpu"] = user_stats["avg_cpu"].fillna(0)
@@ -883,7 +957,7 @@ def display_bcg_matrix():
 
     st.plotly_chart(fig, use_container_width=True)
 
-def chatbot_ui(api_url="http://localhost:5000/rag"):
+def chatbot_ui():
     with st.expander("💬 Chatbot - Ask about tenant patterns & anomalies", expanded=True):
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
@@ -902,12 +976,11 @@ def chatbot_ui(api_url="http://localhost:5000/rag"):
                 waiting_placeholder = st.empty()
                 waiting_placeholder.markdown("*Searching for insights...*")
 
-            try:
-                resp = requests.post(api_url, json={"query": user_query, "mode": "hybrid"}, timeout=60)
-                answer = resp.json().get("answer", "No response from API.")
-            except Exception as e:
-                answer = f"Error: {e}"
+                try:
+                    answer = rag_engine.rag_hybrid(user_query)  # or rag_summary_only, or normal_chat
+                except Exception as e:
+                    answer = f"Error: {e}"
 
-            waiting_placeholder.markdown(answer)
+                waiting_placeholder.markdown(answer)
 
             st.session_state.chat_history.append({"role": "assistant", "content": answer})

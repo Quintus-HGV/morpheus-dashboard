@@ -92,13 +92,15 @@ def fetch_instance_counts():
 
     def query_instances(tx):
         query = """
-        MATCH (t:Tenant)<-[:BELONGS_TO]-(u:User)-[:PERFORMED]->(a:Action)-[r]->(i:Instance)
+        MATCH (t:Tenant)<-[:BELONGS_TO]-(u:User)
+        OPTIONAL MATCH (u)-[:PERFORMED]->(a:Action)-[r]->(i:Instance)
         WHERE type(r) IN ['PROVISIONS', 'DELETES']
         RETURN 
             t.name AS tenant,
-             u.username AS username,
+            u.username AS username,
             i.id AS instance_id,
             i.instance_type AS instance_type,
+            i.plan AS instance_plan,
             a.ts AS action_ts,
             type(r) AS action_type,
             i.curr_status AS curr_status
@@ -136,7 +138,7 @@ def fetch_execution_data():
             j.name AS job_name,
             e.startDate AS ts,
             e.status AS status,
-            e.duration AS duration,
+            e.`duration (in seconds)` AS duration_in_seconds,
             e.type AS process_type
         ORDER BY e.startDate DESC
         """
@@ -162,15 +164,17 @@ def fetch_temporal_activity_data(selected_tenants=None):
         query = """
         // 1. ACTIONS
         MATCH (t:Tenant)<-[:BELONGS_TO]-(u:User)
-        OPTIONAL MATCH (u)-[:PERFORMED]->(a:Action)-[:PROVISIONS]->(i:Instance)
+        OPTIONAL MATCH (u)-[:PERFORMED]->(a:Action)
+        OPTIONAL MATCH (a)-[:PROVISIONS|DELETES]->(i:Instance)
         WHERE $tenants IS NULL OR t.name IN $tenants
         RETURN 
         t.name AS tenant,
         u.username AS user,
         a.ts AS action_ts,
         a.type AS action_type,
+        a.message AS message,
         NULL AS exec_start,
-        NULL AS exec_duration,
+        NULL AS exec_duration_in_seconds,
         NULL AS exec_status,
         NULL AS exec_type,
         NULL AS run_start,
@@ -178,7 +182,8 @@ def fetch_temporal_activity_data(selected_tenants=None):
         NULL AS run_avg_cpu,
         i.name AS instance_name,
         i.id AS instance_id,
-        i.instance_type AS instance_type
+        i.instance_type AS instance_type,
+        i.plan AS instance_plan
 
         UNION
 
@@ -191,8 +196,9 @@ def fetch_temporal_activity_data(selected_tenants=None):
         u.username AS user,
         NULL AS action_ts,
         NULL AS action_type,
+        NULL AS message,
         e.startDate AS exec_start,
-        e.duration AS exec_duration,
+        e.`duration (in seconds)` AS exec_duration_in_seconds,
         e.status AS exec_status,
         e.type AS exec_type,
         NULL AS run_start,
@@ -200,7 +206,8 @@ def fetch_temporal_activity_data(selected_tenants=None):
         NULL AS run_avg_cpu,
         NULL AS instance_name,
         NULL AS instance_id,
-        NULL AS instance_type
+        NULL AS instance_type,
+        NULL AS instance_plan
 
         UNION
 
@@ -213,8 +220,9 @@ def fetch_temporal_activity_data(selected_tenants=None):
         u.username AS user,
         NULL AS action_ts,
         NULL AS action_type,
+        NULL AS message,
         NULL AS exec_start,
-        NULL AS exec_duration,
+        NULL AS exec_duration_in_seconds,
         NULL AS exec_status,
         NULL AS exec_type,
         r.start_date AS run_start,
@@ -222,7 +230,8 @@ def fetch_temporal_activity_data(selected_tenants=None):
         r.avg_cpu_usage_percent AS run_avg_cpu,
         i.name AS instance_name,
         i.id AS instance_id,
-        i.instance_type AS instance_type
+        i.instance_type AS instance_type,
+        i.plan AS instance_plan
 
         ORDER BY tenant, user, action_ts, exec_start, run_start
         """
@@ -259,15 +268,17 @@ def prepare_llm_friendly_json(df):
                     "type": "action",
                     "ts": row["action_ts"].isoformat(),
                     "action_type": row.get("action_type"),
+                    "message": row.get("message"),
                     "instance_name": row.get("instance_name"),
                     "instance_id": row.get("instance_id"),
-                    "instance_type": row.get("instance_type")
+                    "instance_type": row.get("instance_type"),
+                    "instance_plan": row.get("instance_plan"),
                 })
             if pd.notna(row.get("exec_start")):
                 activity.append({
                     "type": "execution",
                     "start": row["exec_start"].isoformat(),
-                    "duration": row.get("exec_duration"),
+                    "duration_in_seconds": row.get("exec_duration_in_seconds"),
                     "status": row.get("exec_status"),
                     "exec_type": row.get("exec_type")
                 })
@@ -279,7 +290,8 @@ def prepare_llm_friendly_json(df):
                     "avg_cpu": row.get("run_avg_cpu"),
                     "instance_name": row.get("instance_name"),
                     "instance_id": row.get("instance_id"),
-                    "instance_type": row.get("instance_type")
+                    "instance_type": row.get("instance_type"),
+                    "instance_plan": row.get("instance_plan")
                 }
                 activity.append(run_event)
 
@@ -330,4 +342,5 @@ def load_combined_data():
 
     combined_df = pd.concat([df, exec_df], ignore_index=True)
     combined_df["date"] = combined_df["ts"].dt.date
+    combined_df["status"] = combined_df["status"].apply(lambda x: "success" if x != "failed" and x else "failed")
     return combined_df
