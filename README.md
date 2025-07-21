@@ -161,6 +161,12 @@ morpheus-user-insights/
 - Streamlit for rapid dashboard development
 - OpenRouter for LLM API access
 
+## Contributors
+- Harsh Gupta (harshgupta.is22@rvce.edu.in)
+- Manish Raj (manishsraj.is22@rvce.edu.in)
+- Sanjana Bhagwath (sanjanab.is22@rvce.edu.in)
+- Syed Umair (syedumair.is22@rvce.edu.in)
+- Yashvanth B L (yashvanthbl.is22@rvce.edu.in)
 ---
 
 **Empowering cloud platform administrators with actionable insights since 2025**  
