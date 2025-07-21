@@ -851,7 +851,7 @@ def insights(selected_tenants):
         "Tenant-wise Temporal Behavior Insights (AI Generated)",
         "These insights are derived from deepseek-chat-v3-0324 model analyzing temporal activity across tenants, highlighting anomalies, patterns, and inefficiencies."
     )
-    with st.expander("View AI Insight for selected Tenant(s)", expanded=True):
+    with st.expander("View AI Insight for selected Tenant(s)"):
         tenants = selected_tenants if selected_tenants else None
         temp_df = fetch_temporal_activity_data(tenants)
 
@@ -867,20 +867,8 @@ def insights(selected_tenants):
             with st.spinner(f"Analyzing behavior for {tenant_name}..."):
                 insight = get_temporal_insights_from_ai(payload_json)
 
-            with st.expander(f"🔹 {tenant_name} Insights", expanded=True):
-                # Use container with scrolling for long insights
-                st.markdown(f"""
-                    <div style="
-                        max-height: 300px; 
-                        overflow-y: auto; 
-                        padding: 10px; 
-                        background: #1e1e1e; 
-                        border-radius: 5px;
-                        border: 1px solid #444;
-                    ">
-                        {insight}
-                    </div>
-                """, unsafe_allow_html=True)
+            with st.expander(f"🔹 {tenant_name} Insights"):
+                st.markdown(insight)
 
 # --- BCG Matrix ---
 def display_bcg_matrix():

@@ -9,6 +9,9 @@ if __name__ == "__main__":
     
     # AI Insights Section
     views.insights(selected_tenants)
+
+    # Chatbot
+    views.chatbot_ui()
     
     # Filter data based on selections
     filtered_df = setup.filter_data(df, selected_tenants, date_range)
@@ -34,5 +37,3 @@ if __name__ == "__main__":
     views.instance_type_distribution(selected_tenants, date_range, selected_weeks, available_weeks, select_all)
     views.display_tenant_gantt_chart(selected_tenants, date_range, selected_weeks, available_weeks, select_all)
     
-    # Chatbot
-    views.chatbot_ui()
