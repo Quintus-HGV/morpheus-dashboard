@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from llm import rag_engine
+from llm import rag_engine, graph_rag_engine
 import plotly.express as px
 import plotly.graph_objects as go
 import datetime
@@ -9,6 +9,7 @@ import json
 import numpy as np
 from setup import graph_heading_with_info
 from load_data import fetch_instance_counts, fetch_run_data, fetch_temporal_activity_data, get_temporal_insights_from_ai, prepare_llm_friendly_json
+from llm.graph_rag_engine import SemanticQueryMatcher
 
 # --- New: Activity Metrics Comparison ---
 def tenant_comparison(selected_tenants, filtered_df):
@@ -932,15 +933,23 @@ def display_bcg_matrix():
     st.plotly_chart(fig, use_container_width=True)
 
 def chatbot_ui():
+    graph_heading_with_info(
+        "RAG based Chatbot for insights",
+        "Choose the type of RAG system - Text or Graph."
+    )
+
     with st.expander("💬 Chatbot - Ask about tenant patterns & anomalies", expanded=True):
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
+
+        mode = st.radio("Choose RAG mode:", ["Text RAG", "Graph RAG"], horizontal=True)
 
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        user_query = st.chat_input("Ask your question here...")
+        user_query = st.chat_input("Eg: The most frequent instance plan, the most active tenant, etc.")
+        graph_rag = SemanticQueryMatcher()
         if user_query:
             st.session_state.chat_history.append({"role": "user", "content": user_query})
             with st.chat_message("user"):
@@ -948,13 +957,23 @@ def chatbot_ui():
 
             with st.chat_message("assistant"):
                 waiting_placeholder = st.empty()
-                waiting_placeholder.markdown("*Searching for insights...*")
 
-                try:
-                    answer = rag_engine.rag_hybrid(user_query)  # or rag_summary_only, or normal_chat
-                except Exception as e:
-                    answer = f"Error: {e}"
+                if mode == "Graph RAG":
+                    waiting_placeholder.markdown("*🔄 Searching in the graph...*")
+                    try:
+                        result = graph_rag.graph_rag(user_query, top_k=1)
+                        formatted_answer = (
+                            f"**🔍 Query:**\n```cypher\n{result['query_run']}\n```\n"
+                            f"**📊 Results:**\n```json\n{json.dumps(result['graph_results'], indent=2)}\n```"
+                        )
+                    except Exception as e:
+                        formatted_answer = f"⚠️ Error while querying graph: {e}"
+                else:
+                    waiting_placeholder.markdown("*🔎 Searching in text logs...*")
+                    try:
+                        formatted_answer = rag_engine.rag_hybrid(user_query)
+                    except Exception as e:
+                        formatted_answer = f"⚠️ Error while searching text logs: {e}"
 
-                waiting_placeholder.markdown(answer)
-
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                waiting_placeholder.markdown(formatted_answer)
+                st.session_state.chat_history.append({"role": "assistant", "content": formatted_answer})

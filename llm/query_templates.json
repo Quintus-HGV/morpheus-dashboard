@@ -1,0 +1,26 @@
+[
+        {
+            "nl_query": "Instances provisioned or deleted by tenant `tenant name`",
+            "cypher": "MATCH (t:Tenant {name: $tenant_name})<-[:BELONGS_TO]-(u:User) OPTIONAL MATCH (u)-[:PERFORMED]->(a:Action) OPTIONAL MATCH (a)-[:PROVISIONS|DELETES]->(i:Instance) RETURN DISTINCT i.name AS instance_name, a.type AS action_type, a.ts AS action_time, u.username AS user ORDER BY a.ts DESC "
+        },
+        {
+            "nl_query": "Instances with specific plan and tenant and deleted by user",
+            "cypher": " MATCH (t:Tenant {name: $tenant_name})<-[:BELONGS_TO]-(u:User) OPTIONAL MATCH (u)-[:PERFORMED]->(a:Action) OPTIONAL MATCH (a)-[:PROVISIONS|DELETES]->(i:Instance) WHERE $plan_name IS NULL OR $plan_name = \"\" OR i.plan = $plan_name RETURN DISTINCT i.name AS instance_name, u.username AS user"
+        },
+        {
+            "nl_query": "Number of instances per plan",
+            "cypher": "MATCH (i:Instance) RETURN i.plan AS plan, COUNT(i) AS instance_count ORDER BY instance_count DESC"
+        },
+        {
+            "nl_query": "Number of instances of a particular instance type",
+            "cypher": " MATCH (i:Instance {instance_type: $instance_type}) RETURN COUNT(i) AS instance_count"
+        },
+        {
+            "nl_query": "Number of instances per tenant",
+            "cypher": " MATCH (t:Tenant)<-[:BELONGS_TO]-(u:User)-[:PERFORMED]->(:Action)-[:PROVISIONS]->(i:Instance) RETURN t.name AS tenant_name, COUNT(i) AS instance_count ORDER BY instance_count DESC "
+        },
+        {
+            "nl_query": "Most popular plan",
+            "cypher": " MATCH (i:Instance) RETURN i.plan AS plan, COUNT(*) AS count ORDER BY count DESC LIMIT 1"
+        }
+    ]
