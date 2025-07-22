@@ -93,26 +93,7 @@ def tenant_comparison(selected_tenants, filtered_df):
         use_container_width=True
     )
     
-    # --- Activity Trend Comparison ---
-    st.markdown("### Activity Trend Comparison")
-    daily_activity = filtered_df.groupby(["date", "tenant"]).size().unstack().fillna(0)
     
-    fig = px.line(
-        daily_activity,
-        x=daily_activity.index,
-        y=daily_activity.columns,
-        title="Daily Activity Trend Comparison",
-        labels={"value": "Activity Count", "date": "Date", "variable": "Tenant"},
-        height=500
-    )
-    fig.update_layout(
-        hovermode="x unified",
-        legend_title_text="Tenant",
-        plot_bgcolor="#111111",
-        paper_bgcolor="#111111",
-        font_color="white"
-    )
-    st.plotly_chart(fig, use_container_width=True)
     
     # --- Peak Usage Analysis ---
     st.markdown("### Peak Usage Analysis")
@@ -233,44 +214,49 @@ def user_engagement_insights(filtered_df):
 def user_activity_trends_simple(filtered_df):
     """
     Weekly user activity (absolute counts) shown as small-multiples bar charts.
-    Much cleaner than the percentage-stacked monster.
+    Now supports tenant selection via dropdown.
     """
     graph_heading_with_info(
         "Weekly User Activity Count",
         "Each mini-chart shows how many actions each user performed per week. "
-        "Easier to read and compare across tenants."
+        "Select a tenant to view their users' activity trends."
     )
+
+    # Tenant selection dropdown
+    tenants = sorted(filtered_df["tenant"].unique())
+    selected_tenant = st.selectbox("Select Tenant", tenants)
+
+    # Filter for selected tenant
+    df_tenant = filtered_df[filtered_df["tenant"] == selected_tenant].copy()
 
     # 1. keep only last 8 weeks to avoid clutter
     cutoff = datetime.date.today() - datetime.timedelta(weeks=8)
-    df = filtered_df[filtered_df["date"] >= cutoff].copy()
+    df_tenant = df_tenant[df_tenant["date"] >= cutoff].copy()
 
     # 2. week start (Monday)
-    df["week_start"] = df["ts"] - pd.to_timedelta(df["ts"].dt.weekday, unit="D")
-    df["week_start"] = df["week_start"].dt.date
+    df_tenant["week_start"] = df_tenant["ts"] - pd.to_timedelta(df_tenant["ts"].dt.weekday, unit="D")
+    df_tenant["week_start"] = df_tenant["week_start"].dt.date
 
     # 3. counts per user per week
     counts = (
-        df.groupby(["week_start", "tenant", "username"])
+        df_tenant.groupby(["week_start", "username"])
         .size()
         .reset_index(name="activity_count")
     )
 
-    # 4. small-multiples bar chart
+    # 4. bar chart (no facet, only selected tenant)
     fig = px.bar(
         counts,
         x="week_start",
         y="activity_count",
         color="username",
-        facet_col="tenant",
-        facet_col_wrap=2,
         height=600,
         labels={
             "activity_count": "Actions",
             "week_start": "Week Starting",
             "username": "User",
         },
-        title="Weekly Actions per User"
+        title=f"Weekly Actions per User ({selected_tenant})"
     )
 
     fig.update_xaxes(tickformat="%b %d", tickangle=-45)
