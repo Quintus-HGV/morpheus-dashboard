@@ -163,7 +163,7 @@ morpheus-user-insights/
 
 ## Contributors
 - Harsh Gupta (harshgupta.is22@rvce.edu.in)
-- Manish Raj (manishsraj.is22@rvce.edu.in)
+- Manish S Raj (manishsraj.is22@rvce.edu.in)
 - Sanjana Bhagwath (sanjanab.is22@rvce.edu.in)
 - Syed Umair (syedumair.is22@rvce.edu.in)
 - Yashvanth B L (yashvanthbl.is22@rvce.edu.in)
