@@ -25,6 +25,8 @@ Cloud platforms traditionally lack visibility into end-to-end user journeys, foc
 - Tenant behavior analysis using DeepSeek AI
 - Temporal pattern detection (anomalies, inefficiencies, trends)
 - Predictive resource allocation recommendations
+- **Retrieval-Augmented Generation (RAG):**  
+  Leverages RAG techniques to enable natural language Q&A on tenant activity, combining structured graph queries and unstructured log/summaries for richer, context-aware answers.
 
 ### 👥 User Engagement Metrics
 - Top engaged user identification
